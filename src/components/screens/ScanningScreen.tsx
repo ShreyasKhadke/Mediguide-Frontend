@@ -29,7 +29,7 @@ export function ScanningScreen() {
           console.log('No currentReportId after delay, redirecting to scan');
           setCurrentScreen('scan');
         }
-      }, 500);
+      }, 2000);
       return () => clearTimeout(timer);
     }
 
