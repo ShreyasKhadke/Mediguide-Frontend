@@ -128,8 +128,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setIsLoggedIn(true);
           // Map Supabase user to app user format if needed
           // For now, we'll just set logged in state
-          // Navigate to home if user is authenticated
-          setCurrentScreen('home');
+
+          // Restore previous state if available
+          const savedScreen = localStorage.getItem('mediguide_current_screen') as Screen | null;
+          const savedTab = localStorage.getItem('mediguide_active_tab') as Tab | null;
+
+          if (savedScreen && savedScreen !== 'splash' && savedScreen !== 'onboarding' && savedScreen !== 'login' && savedScreen !== 'signup') {
+            setCurrentScreen(savedScreen);
+            if (savedTab) {
+              setActiveTab(savedTab);
+            }
+          } else {
+            setCurrentScreen('home');
+          }
         } else {
           setIsLoggedIn(false);
           setCurrentScreen('onboarding');
@@ -154,12 +165,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setIsLoggedIn(true);
         const supabaseUser = await getCurrentUser();
         if (supabaseUser) {
-          setCurrentScreen('home');
+          // Check for saved state on sign in as well
+          const savedScreen = localStorage.getItem('mediguide_current_screen') as Screen | null;
+          const savedTab = localStorage.getItem('mediguide_active_tab') as Tab | null;
+
+          if (savedScreen && savedScreen !== 'splash' && savedScreen !== 'onboarding' && savedScreen !== 'login' && savedScreen !== 'signup') {
+            setCurrentScreen(savedScreen);
+            if (savedTab) {
+              setActiveTab(savedTab);
+            }
+          } else {
+            setCurrentScreen('home');
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         setIsLoggedIn(false);
         setUser(null);
         setCurrentScreen('onboarding');
+        // Clear saved state on logout
+        localStorage.removeItem('mediguide_current_screen');
+        localStorage.removeItem('mediguide_active_tab');
       } else if (event === 'TOKEN_REFRESHED' && session) {
         // Session refreshed, user still logged in
         setIsLoggedIn(true);
@@ -170,6 +195,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Save state whenever it changes
+  useEffect(() => {
+    if (isLoggedIn && currentScreen !== 'splash' && currentScreen !== 'onboarding' && currentScreen !== 'login' && currentScreen !== 'signup') {
+      localStorage.setItem('mediguide_current_screen', currentScreen);
+    }
+    if (isLoggedIn && activeTab) {
+      localStorage.setItem('mediguide_active_tab', activeTab);
+    }
+  }, [currentScreen, activeTab, isLoggedIn]);
 
   return (
     <AppContext.Provider
