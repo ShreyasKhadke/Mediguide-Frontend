@@ -41,6 +41,8 @@ export function ReportExplanationScreen() {
     const clinicalSummary = metadataParams.find(i => i.name === 'METADATA_CLINICAL_SUMMARY')?.value;
     const overallIndication = metadataParams.find(i => i.name === 'METADATA_INDICATION')?.value;
     const rawSystemSummaries = metadataParams.find(i => i.name === 'METADATA_SYSTEM_SUMMARIES')?.value;
+    const normalSummaryParam = metadataParams.find(i => i.name === 'METADATA_NORMAL_SUMMARY');
+    const normalSummary = normalSummaryParam?.explanation?.meaning || normalSummaryParam?.value;
 
     let systemSummaries: any[] = [];
     try {
@@ -235,7 +237,13 @@ export function ReportExplanationScreen() {
                                 Values Within Reference Range
                             </h3>
 
-                            {systemSummaries.length > 0 ? (
+                            {normalSummary ? (
+                                <div className="card-elevated p-5 bg-success/5 border-success/10">
+                                    <p className="text-body text-text-secondary leading-relaxed">
+                                        {normalSummary}
+                                    </p>
+                                </div>
+                            ) : systemSummaries.length > 0 ? (
                                 <div className="space-y-4">
                                     {systemSummaries.map((sys, idx) => (
                                         <div key={idx} className="card-elevated p-5">
