@@ -20,6 +20,8 @@ export function ScanScreen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const isMounted = useRef(true);
+
   const handleBack = () => {
     stopCamera();
     setActiveTab('home');
@@ -28,12 +30,19 @@ export function ScanScreen() {
 
   const stopCamera = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+      });
       streamRef.current = null;
     }
   };
 
   const initCamera = async () => {
+    // Ensure clean slate
+    stopCamera();
+
+    if (!isMounted.current) return;
+
     setCameraError(null);
     setPermissionState('checking');
 
@@ -51,18 +60,28 @@ export function ScanScreen() {
         }
       });
 
+      if (!isMounted.current) {
+        // If unmounted during init, clean up immediately
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
       streamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         // Wait for the video to be ready to play
         videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().catch(e => console.error("Play error:", e));
-          setPermissionState('granted');
+          if (isMounted.current && videoRef.current) {
+            videoRef.current.play().catch(e => console.error("Play error:", e));
+            setPermissionState('granted');
+          }
         };
       }
     } catch (err: any) {
       console.error('Camera initialization failed:', err);
+
+      if (!isMounted.current) return;
 
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setPermissionState('denied');
@@ -70,6 +89,12 @@ export function ScanScreen() {
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         setPermissionState('error');
         setCameraError('No camera found on this device.');
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        setPermissionState('error');
+        setCameraError('Camera is in use by another application.');
+      } else if (err.name === 'OverconstrainedError') {
+        setPermissionState('error');
+        setCameraError('Camera does not support the required resolution.');
       } else {
         setPermissionState('error');
         setCameraError('Failed to start camera. Please try again.');
@@ -78,9 +103,11 @@ export function ScanScreen() {
   };
 
   useEffect(() => {
+    isMounted.current = true;
     initCamera();
 
     return () => {
+      isMounted.current = false;
       stopCamera();
     };
   }, []);

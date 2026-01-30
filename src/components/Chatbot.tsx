@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { askMediBot } from '@/lib/api';
 import { toast } from 'sonner';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
     id: string;
@@ -38,6 +39,19 @@ export function Chatbot({ reportId }: ChatbotProps) {
             scrollToBottom();
         }
     }, [messages, isOpen]);
+
+    // Helper to clean up internal metadata tokens
+    const cleanMessage = (content: string) => {
+        return content
+            .replace(/\*\*METADATA_NORMAL_SUMMARY\*\*/g, '**Normal Values Summary**')
+            .replace(/METADATA_NORMAL_SUMMARY/g, 'Normal Values Summary')
+            .replace(/METADATA_AGE/g, 'Patient Age')
+            .replace(/METADATA_SEX/g, 'Patient Sex')
+            .replace(/METADATA_INDICATION/g, 'Health Indication')
+            .replace(/METADATA_CLINICAL_SUMMARY/g, 'Clinical Summary')
+            .replace(/METADATA_SYSTEM_SUMMARIES/g, 'System Summaries')
+            .replace(/METADATA_SUMMARY/g, 'Summary');
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -128,7 +142,15 @@ export function Chatbot({ reportId }: ChatbotProps) {
                                 ? "bg-primary text-primary-foreground"
                                 : "bg-muted text-foreground"
                         )}>
-                            {msg.content}
+                            {msg.role === 'assistant' ? (
+                                <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:mb-2 [&>p:last-child]:mb-0">
+                                    <ReactMarkdown>
+                                        {cleanMessage(msg.content)}
+                                    </ReactMarkdown>
+                                </div>
+                            ) : (
+                                msg.content
+                            )}
                         </div>
                     </div>
                 ))}

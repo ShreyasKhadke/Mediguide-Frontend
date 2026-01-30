@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '@/contexts/AppContext';
-import { ArrowLeft, Share2, Download, MessageCircle, AlertTriangle, Check, Brain, ChevronRight, FileText } from 'lucide-react';
+import { ArrowLeft, Share2, Download, MessageCircle, AlertTriangle, Check, Brain, ChevronRight, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getReport, getReportParameters, getReportSynthesis } from '@/lib/api';
 import { toast } from 'sonner';
+import { usePDFExport } from '@/hooks/usePDFExport';
 
 interface ExplanationItem {
     id: string;
@@ -23,6 +24,8 @@ interface ExplanationItem {
 
 export function ReportExplanationScreen() {
     const { setCurrentScreen, currentReportId, user } = useApp();
+    const { downloadPDF, isExporting } = usePDFExport();
+    const contentRef = useRef<HTMLDivElement>(null);
     const [report, setReport] = useState<any>(null);
     const [items, setItems] = useState<ExplanationItem[]>([]);
     const [synthesis, setSynthesis] = useState<any>(null);
@@ -53,6 +56,10 @@ export function ReportExplanationScreen() {
 
     const handleBack = () => {
         setCurrentScreen('report-result');
+    };
+
+    const handleDownload = () => {
+        downloadPDF(contentRef, `Report_${report?.patient_name || 'Medical'}_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
     useEffect(() => {
@@ -107,15 +114,19 @@ export function ReportExplanationScreen() {
                             AI-Generated • Educational Only
                         </p>
                     </div>
-                    <button className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors">
-                        <Download className="w-5 h-5 text-text-secondary" />
+                    <button
+                        onClick={handleDownload}
+                        disabled={isExporting}
+                        className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-muted transition-colors disabled:opacity-50"
+                    >
+                        {isExporting ? <Loader2 className="w-5 h-5 text-text-secondary animate-spin" /> : <Download className="w-5 h-5 text-text-secondary" />}
                     </button>
                 </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-                <div className="max-w-2xl mx-auto p-5 space-y-8">
+                <div className="max-w-2xl mx-auto p-5 space-y-8" ref={contentRef}>
 
                     {/* Disclaimer */}
                     <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex gap-3">
