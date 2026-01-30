@@ -13,7 +13,9 @@ export function AuthModal() {
     setShowAuthModal,
     authMode,
     setCurrentScreen,
-    setIsLoggedIn
+    setActiveTab,
+    setIsLoggedIn,
+    fetchUserProfile
   } = useApp();
 
   const [email, setEmail] = useState('');
@@ -140,12 +142,16 @@ export function AuthModal() {
         }
 
         if (user && session) {
+          // Fetch profile before transitioning
+          await fetchUserProfile(user);
+
           toast.success('Welcome back!', {
             description: 'Successfully logged in',
           });
           setShowAuthModal(false);
           setIsLoggedIn(true);
           setCurrentScreen('home');
+          setActiveTab('home');
         }
       }
     } catch (err) {
@@ -257,6 +263,9 @@ export function AuthModal() {
             // Continue anyway - user can set password later
           }
         }
+
+        // Fetch profile before transitioning (might be empty/new)
+        await fetchUserProfile(user);
 
         toast.success('Email verified successfully!', {
           description: 'Welcome to MediGuide',

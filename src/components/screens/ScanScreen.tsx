@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
-import { ArrowLeft, Image, Paperclip, Camera, X } from 'lucide-react';
+import { ArrowLeft, Image, Paperclip, Camera, X, RefreshCcw, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { uploadReport } from '@/lib/api';
@@ -10,22 +10,152 @@ export function ScanScreen() {
   const { setCurrentScreen, setActiveTab, setCurrentReportId } = useApp();
   const [capturedImages, setCapturedImages] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [permissionState, setPermissionState] = useState<'checking' | 'granted' | 'denied' | 'error'>('checking');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null); // For fallback
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const handleBack = () => {
+    stopCamera();
     setActiveTab('home');
     setCurrentScreen('home');
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const newFiles = Array.from(files);
-      setCapturedImages([...capturedImages, ...newFiles]);
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
-    // Reset inputs so the same file handles change event again if needed
+  };
+
+  const initCamera = async () => {
+    setCameraError(null);
+    setPermissionState('checking');
+
+    try {
+      // Check if browser supports mediaDevices
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API not available');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment', // Prefer back camera
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      });
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // Wait for the video to be ready to play
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch(e => console.error("Play error:", e));
+          setPermissionState('granted');
+        };
+      }
+    } catch (err: any) {
+      console.error('Camera initialization failed:', err);
+
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setPermissionState('denied');
+        setCameraError('Camera access denied. Please allow permission to scan.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        setPermissionState('error');
+        setCameraError('No camera found on this device.');
+      } else {
+        setPermissionState('error');
+        setCameraError('Failed to start camera. Please try again.');
+      }
+    }
+  };
+
+  useEffect(() => {
+    initCamera();
+
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
+  const captureImage = () => {
+    if (!videoRef.current || !canvasRef.current || permissionState !== 'granted') return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+
+    if (!context) return;
+
+    // Set canvas dimensions to match video source size
+    if (video.videoWidth && video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // Draw video frame to canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Convert to file
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `scan_${Date.now()}.jpg`, { type: 'image/jpeg' });
+          validateAndAddFiles([file] as unknown as FileList, 'image');
+          toast.success('Image captured');
+        }
+      }, 'image/jpeg', 0.85);
+    }
+  };
+
+  const validateAndAddFiles = (files: FileList | null, type: 'image' | 'pdf') => {
+    if (!files || files.length === 0) return;
+
+    const newFiles: File[] = [];
+    let hasInvalidFile = false;
+
+    Array.from(files).forEach(file => {
+      if (type === 'image') {
+        if (file.type.startsWith('image/')) {
+          newFiles.push(file);
+        } else {
+          hasInvalidFile = true;
+        }
+      } else if (type === 'pdf') {
+        if (file.type === 'application/pdf') {
+          newFiles.push(file);
+        } else {
+          hasInvalidFile = true;
+        }
+      }
+    });
+
+    if (hasInvalidFile) {
+      toast.error(`Please select ${type === 'image' ? 'image' : 'PDF'} files only.`);
+    }
+
+    if (newFiles.length > 0) {
+      setCapturedImages(prev => [...prev, ...newFiles]);
+    }
+  };
+
+  const handleGallerySelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    validateAndAddFiles(e.target.files, 'image');
+    if (e.target) e.target.value = '';
+  };
+
+  const handleCameraSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    validateAndAddFiles(e.target.files, 'image');
+    if (e.target) e.target.value = '';
+  };
+
+  const handlePdfSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    validateAndAddFiles(e.target.files, 'pdf');
     if (e.target) e.target.value = '';
   };
 
@@ -33,8 +163,15 @@ export function ScanScreen() {
     galleryInputRef.current?.click();
   };
 
-  const handleCameraClick = () => {
-    cameraInputRef.current?.click();
+  // Primary action button handler
+  const handlePrimaryAction = () => {
+    if (permissionState === 'granted') {
+      captureImage();
+    } else if (permissionState === 'denied' || permissionState === 'error') {
+      // Only fallback if camera is definitely broken/denied
+      cameraInputRef.current?.click();
+    }
+    // If checking, do nothing (prevent accidental fallback trigger while loading)
   };
 
   const handleFileClick = () => {
@@ -73,41 +210,39 @@ export function ScanScreen() {
 
   return (
     <div className="absolute inset-0 bg-foreground overflow-hidden flex flex-col">
+      {/* Hidden Canvas for Capture */}
+      <canvas ref={canvasRef} className="hidden" />
+
       {/* Top Bar */}
-      <div className="pt-12 px-5 pb-4 flex items-center justify-between">
+      <div className="pt-12 px-5 pb-4 flex items-center justify-between z-10">
         <button
           onClick={handleBack}
-          className="w-10 h-10 flex items-center justify-center"
+          className="w-10 h-10 flex items-center justify-center bg-black/20 rounded-full backdrop-blur-sm"
         >
           <ArrowLeft className="w-6 h-6 text-primary-foreground" />
         </button>
-        <h1 className="text-section text-primary-foreground font-semibold">Scan Document</h1>
+        <h1 className="text-section text-primary-foreground font-semibold drop-shadow-md">Scan Document</h1>
         <div className="w-10" />
       </div>
 
-      {/* Preview List */}
+      {/* Preview List Overlay */}
       {capturedImages.length > 0 && (
-        <div className="px-5 py-3 flex gap-2 overflow-x-auto">
+        <div className="absolute top-24 left-0 right-0 z-20 px-5 py-3 flex gap-2 overflow-x-auto bg-black/40 backdrop-blur-sm">
           {capturedImages.map((file, index) => (
             <div
               key={`${file.name}-${index}`}
-              className="relative w-20 h-20 rounded-lg bg-card/20 shrink-0 overflow-hidden flex items-center justify-center border border-primary-foreground/20"
+              className="relative w-16 h-16 rounded-lg bg-card/20 shrink-0 overflow-hidden flex items-center justify-center border border-primary-foreground/20"
             >
               <button
                 onClick={() => removeImage(index)}
-                className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-destructive flex items-center justify-center z-10"
+                className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive flex items-center justify-center z-10"
               >
                 <X className="w-3 h-3 text-destructive-foreground" />
               </button>
 
               {isPDF(file) ? (
-                <div className="flex flex-col items-center justify-center p-2 text-center">
-                  <div className="bg-red-500/20 p-1.5 rounded-md mb-1">
-                    <Paperclip className="w-4 h-4 text-red-500" />
-                  </div>
-                  <span className="text-[8px] text-primary-foreground line-clamp-2 leading-tight">
-                    {file.name}
-                  </span>
+                <div className="flex flex-col items-center justify-center p-1 text-center">
+                  <Paperclip className="w-4 h-4 text-primary-foreground" />
                 </div>
               ) : (
                 <img
@@ -121,29 +256,58 @@ export function ScanScreen() {
         </div>
       )}
 
-      {/* Camera View / Placeholder */}
-      <div className="flex-1 relative mx-5 rounded-2xl overflow-hidden bg-foreground/80 flex flex-col items-center justify-center">
-        {/* Viewfinder Overlay */}
-        <div className="absolute inset-8 border-2 border-dashed border-primary-foreground/50 rounded-xl" />
+      {/* Camera View Area */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
+        {/* Video Element - ALWAYS RENDERED to ensure ref exists */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={cn(
+            "w-full h-full object-cover transition-opacity duration-300",
+            permissionState === 'granted' ? "opacity-100" : "opacity-0"
+          )}
+        />
 
-        <div className="text-center p-6 bg-black/40 backdrop-blur-sm rounded-xl max-w-[80%]">
-          <Camera className="w-12 h-12 text-primary-foreground/50 mx-auto mb-4" />
-          <p className="text-body text-primary-foreground/90 font-medium mb-1">
-            Tap the camera button below
-          </p>
-          <p className="text-caption text-primary-foreground/60">
-            to take a photo of your medical report
-          </p>
-        </div>
+        {/* States Overlay */}
+        {permissionState !== 'granted' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center max-w-[80%] z-10">
+            {permissionState === 'checking' && (
+              <div className="animate-pulse flex flex-col items-center">
+                <Camera className="w-12 h-12 text-primary-foreground/50 mb-4" />
+                <p className="text-body text-primary-foreground/60">Starting camera...</p>
+              </div>
+            )}
+
+            {(permissionState === 'denied' || permissionState === 'error') && (
+              <>
+                <Info className="w-12 h-12 text-destructive mb-4" />
+                <p className="text-body text-primary-foreground font-medium mb-4">
+                  {cameraError || 'Camera unavailable'}
+                </p>
+                <Button variant="secondary" onClick={initCamera} className="gap-2">
+                  <RefreshCcw className="w-4 h-4" />
+                  Try Again
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Viewfinder Overlay - visible only when camera is active */}
+        {permissionState === 'granted' && (
+          <div className="absolute inset-x-8 inset-y-32 border-2 border-dashed border-primary-foreground/30 rounded-2xl pointer-events-none" />
+        )}
       </div>
 
       {/* Capture Controls */}
-      <div className="px-5 py-6 bg-foreground/95 pb-10">
-        {/* Scan Button */}
+      <div className="absolute bottom-0 inset-x-0 px-5 py-8 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-20">
+        {/* Scan Button (if images captured) */}
         {capturedImages.length > 0 && (
           <Button
             size="lg"
-            className="w-full mb-6"
+            className="w-full mb-8 shadow-lg"
             onClick={handleScan}
             disabled={uploading}
           >
@@ -152,39 +316,46 @@ export function ScanScreen() {
         )}
 
         {/* Control Row */}
-        <div className="flex items-center justify-around translate-y-2">
+        <div className="flex items-center justify-around translate-y-2 mb-4">
           {/* Gallery */}
           <button
             onClick={handleGalleryClick}
-            className="flex flex-col items-center gap-1.5 py-2 px-4 active:scale-95 transition-transform"
+            className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <div className="w-12 h-12 rounded-full bg-primary-foreground/10 flex items-center justify-center backdrop-blur-md">
+            <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20">
               <Image className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-caption font-medium text-primary-foreground/80">Gallery</span>
+            <span className="text-[12px] font-medium text-primary-foreground/90 shadow-black drop-shadow-md">Gallery</span>
             <input
               ref={galleryInputRef}
               type="file"
-              accept="image/*,application/pdf"
-              onChange={handleFileSelect}
+              accept="image/*"
+              onChange={handleGallerySelect}
               className="hidden"
             />
           </button>
 
-          {/* Camera (Primary Action) */}
+          {/* Camera Capture / Trigger */}
           <button
-            onClick={handleCameraClick}
-            className="w-20 h-20 rounded-full bg-primary-foreground flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.3)] active:scale-90 transition-all duration-200 -mt-8"
+            onClick={handlePrimaryAction}
+            className="w-20 h-20 rounded-full bg-transparent border-[4px] border-primary-foreground flex items-center justify-center active:scale-95 transition-all duration-200 -mt-2"
           >
-            <div className="w-[72px] h-[72px] rounded-full border-[3px] border-foreground flex items-center justify-center">
-              <Camera className="w-8 h-8 text-foreground fill-foreground" />
+            <div className={cn(
+              "w-[66px] h-[66px] rounded-full flex items-center justify-center transition-colors",
+              permissionState === 'granted' ? "bg-primary-foreground" : "bg-primary-foreground/50"
+            )}>
+              <Camera className={cn(
+                "w-8 h-8 fill-current",
+                permissionState === 'granted' ? "text-primary" : "text-primary-foreground"
+              )} />
             </div>
+            {/* Fallback input if camera fails */}
             <input
               ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={handleFileSelect}
+              onChange={handleCameraSelect}
               className="hidden"
             />
           </button>
@@ -192,17 +363,17 @@ export function ScanScreen() {
           {/* File/PDF */}
           <button
             onClick={handleFileClick}
-            className="flex flex-col items-center gap-1.5 py-2 px-4 active:scale-95 transition-transform"
+            className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <div className="w-12 h-12 rounded-full bg-primary-foreground/10 flex items-center justify-center backdrop-blur-md">
+            <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20">
               <Paperclip className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-caption font-medium text-primary-foreground/80">PDF</span>
+            <span className="text-[12px] font-medium text-primary-foreground/90 shadow-black drop-shadow-md">PDF</span>
             <input
               ref={fileInputRef}
               type="file"
               accept="application/pdf"
-              onChange={handleFileSelect}
+              onChange={handlePdfSelect}
               className="hidden"
             />
           </button>
